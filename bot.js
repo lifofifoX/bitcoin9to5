@@ -32,6 +32,8 @@ const QUOTE_PRODUCT_ID = 0
 const TARGET_LEVERAGE = 10
 const SIZE_INCREMENT_X18 = 50000000000000n
 const PROFIT_TARGET_PCT = 1.0
+const TP_ZONE_TRAILING_STOP_PCT = 0.5
+const TP_ZONE_HOURS_THRESHOLD = 6
 const POLL_INTERVAL = 30000
 const STATE_FILE = '.bot-state.json'
 const MARKET_DATA_FILE = '.market-data.json'
@@ -56,12 +58,12 @@ const loadState = () => {
   try {
     if (existsSync(STATE_FILE)) {
       const data = JSON.parse(readFileSync(STATE_FILE, 'utf8'))
-      return { ...data, processing: false }
+      return { ...data, processing: false, inTpZone: data.inTpZone || false, tpZonePeakPrice: data.tpZonePeakPrice || null }
     }
   } catch (err) {
     console.error('Failed to load state:', err.message)
   }
-  return { entryPrice: null, zone: 'long', tookProfit: false, processing: false }
+  return { entryPrice: null, zone: 'long', processing: false, inTpZone: false, tpZonePeakPrice: null }
 }
 
 const saveState = () => {
@@ -122,6 +124,26 @@ const getZone = () => {
   const beforeClose = hour < 16 || (hour === 16 && minute < 1)
 
   return (afterOpen && beforeClose) ? 'short' : 'long'
+}
+
+const getHoursUntilShortZone = () => {
+  const now = DateTime.now().setZone(tz)
+
+  const config = loadZoneConfig()
+  const shortCron = config?.flipToShortTime || '29 9 * * 1-5'
+  const [minute, hour] = shortCron.split(' ').map(Number)
+
+  let nextShort = now.set({ hour, minute, second: 0, millisecond: 0 })
+
+  if (nextShort <= now) {
+    nextShort = nextShort.plus({ days: 1 })
+  }
+
+  while (nextShort.weekday >= 6 || holidays.has(nextShort.toISODate())) {
+    nextShort = nextShort.plus({ days: 1 })
+  }
+
+  return nextShort.diff(now, 'hours').hours
 }
 
 const log = (kind, details) => {
@@ -275,7 +297,8 @@ const enterPosition = async (side) => {
   const leverage = (notional / collateral).toFixed(1)
 
   state.entryPrice = Number(price)
-  state.tookProfit = false
+  state.inTpZone = false
+  state.tpZonePeakPrice = null
   saveState()
 
   log(`enter-${side}`, { amountX18: totalAmountX18.toString(), price, leverage: `${leverage}x`, result: result.data })
@@ -290,7 +313,6 @@ const flipToShort = async () => {
 
   try {
     state.zone = 'short'
-    state.tookProfit = false
     saveState()
     await enterPosition('short')
   } catch (err) {
@@ -301,7 +323,6 @@ const flipToShort = async () => {
 const flipToLong = async () => {
   try {
     state.zone = 'long'
-    state.tookProfit = false
     saveState()
     await enterPosition('long')
   } catch (err) {
@@ -309,7 +330,7 @@ const flipToLong = async () => {
   }
 }
 
-const checkProfitAndReentry = async () => {
+const checkProfit = async () => {
   if (state.processing) return
   state.processing = true
 
@@ -319,16 +340,10 @@ const checkProfitAndReentry = async () => {
     const midPrice = (Number(price.bid) + Number(price.ask)) / 2
 
     if (position.side === 'flat') {
-      if (state.tookProfit && state.entryPrice) {
-        const zone = getZone()
-        const shouldReenter = zone === 'short'
-          ? midPrice >= state.entryPrice
-          : midPrice <= state.entryPrice
-
-        if (shouldReenter) {
-          log('reenter', { zone, midPrice, entryPrice: state.entryPrice })
-          await enterPosition(zone)
-        }
+      if (state.inTpZone) {
+        state.inTpZone = false
+        state.tpZonePeakPrice = null
+        saveState()
       }
       return
     }
@@ -343,7 +358,51 @@ const checkProfitAndReentry = async () => {
 
     const profitPct = (priceDiff / state.entryPrice) * 100
 
+    if (position.side === 'long' && state.inTpZone) {
+      if (midPrice > state.tpZonePeakPrice) {
+        state.tpZonePeakPrice = midPrice
+        saveState()
+      }
+
+      const hoursUntilShort = getHoursUntilShortZone()
+      const dropFromPeak = ((state.tpZonePeakPrice - midPrice) / state.tpZonePeakPrice) * 100
+      const belowEntry = midPrice < state.entryPrice
+
+      if (dropFromPeak >= TP_ZONE_TRAILING_STOP_PCT || hoursUntilShort <= TP_ZONE_HOURS_THRESHOLD || belowEntry) {
+        const reason = belowEntry ? 'below-entry' : dropFromPeak >= TP_ZONE_TRAILING_STOP_PCT ? 'trailing-stop' : 'time-exit'
+        log('tp-zone-exit', {
+          reason,
+          entry: state.entryPrice,
+          peak: state.tpZonePeakPrice,
+          exit: midPrice,
+          profitPct: profitPct.toFixed(2),
+          hoursUntilShort: hoursUntilShort.toFixed(1)
+        })
+        await closePosition()
+        state.inTpZone = false
+        state.tpZonePeakPrice = null
+        saveState()
+      }
+      return
+    }
+
     if (profitPct >= PROFIT_TARGET_PCT) {
+      if (position.side === 'long') {
+        const hoursUntilShort = getHoursUntilShortZone()
+        if (hoursUntilShort > TP_ZONE_HOURS_THRESHOLD) {
+          log('tp-zone-enter', {
+            entry: state.entryPrice,
+            currentPrice: midPrice,
+            profitPct: profitPct.toFixed(2),
+            hoursUntilShort: hoursUntilShort.toFixed(1)
+          })
+          state.inTpZone = true
+          state.tpZonePeakPrice = midPrice
+          saveState()
+          return
+        }
+      }
+
       log('profit-take', {
         side: position.side,
         entry: state.entryPrice,
@@ -351,8 +410,6 @@ const checkProfitAndReentry = async () => {
         profitPct: profitPct.toFixed(2)
       })
       await closePosition()
-      state.tookProfit = true
-      saveState()
     }
   } catch (err) {
     console.error('price check error:', err)
@@ -363,7 +420,7 @@ const checkProfitAndReentry = async () => {
 
 const startPriceMonitor = () => {
   setInterval(() => {
-    checkProfitAndReentry().catch(err => console.error('monitor error:', err))
+    checkProfit().catch(err => console.error('monitor error:', err))
   }, POLL_INTERVAL)
 }
 
@@ -537,6 +594,7 @@ console.log('Bot running - Nado Perps (smart flip strategy)')
 console.log('Account:', account.address)
 log('schedule', { short: zoneConfig?.flipToShortReadable || '9:29', long: zoneConfig?.flipToLongReadable || '16:01' })
 console.log(`Profit target: ${PROFIT_TARGET_PCT}% price move (~${PROFIT_TARGET_PCT * TARGET_LEVERAGE}% PnL)`)
+console.log(`TP zone: trailing stop ${TP_ZONE_TRAILING_STOP_PCT}%, ${TP_ZONE_HOURS_THRESHOLD}h threshold`)
 console.log(`Price check interval: ${POLL_INTERVAL / 1000}s`)
 console.log('Data collection: 7-11 AM, 2-6 PM ET (every 5 min). Analysis: 6 PM ET')
 
@@ -559,7 +617,7 @@ try {
   }
 
   saveState()
-  console.log('State:', { zone: state.zone, entryPrice: state.entryPrice, tookProfit: state.tookProfit })
+  console.log('State:', { zone: state.zone, entryPrice: state.entryPrice, inTpZone: state.inTpZone })
 
   analyzeAndUpdateConfig()
   startPriceMonitor()

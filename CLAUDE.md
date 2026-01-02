@@ -32,7 +32,11 @@ Zones (direction the bot trades):
 
 Profit-taking:
 - Close at 1% price move in favor (~10% PnL at 10x leverage)
-- Re-enter same direction if price returns to original entry (captures multiple swings per zone)
+
+Take-profit zone (longs only):
+- When long hits profit target with 6+ hours until short zone, enters TP zone instead of closing
+- Tracks peak price and uses 0.5% trailing stop to protect gains
+- Exits if price drops below original entry or 6 hours before short zone
 
 Adaptive learning:
 - Records prices every 5 min during 7-11 AM and 2-6 PM ET
@@ -45,9 +49,11 @@ Key constants:
 - `BTC_PERP_PRODUCT_ID = 2`
 - `TARGET_LEVERAGE = 10`
 - `PROFIT_TARGET_PCT = 1.0`
+- `TP_ZONE_TRAILING_STOP_PCT = 0.5`
+- `TP_ZONE_HOURS_THRESHOLD = 6`
 
 State files (gitignored):
-- `.bot-state.json` - Entry price, zone, profit-take status
+- `.bot-state.json` - Entry price, zone, TP zone state
 - `.market-data.json` - Price snapshots for analysis
 - `.zone-config.json` - Current optimal zone times
 

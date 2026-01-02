@@ -10,7 +10,13 @@ BTC perpetual futures trading bot for Nado exchange.
 
 At each zone change, the bot flips direction—closing any existing position and opening a new one in the zone's direction.
 
-**Profit-taking:** When price moves 1% in your favor, the bot closes for profit (~10% gain at 10x leverage). If price then returns to the original entry, it re-enters the same direction—capturing multiple swings within a zone.
+**Profit-taking:** When price moves 1% in your favor, the bot closes for profit (~10% gain at 10x leverage).
+
+**Take-profit zone (longs only):** When a long hits the profit target with 6+ hours until short zone, the bot enters a "TP zone" instead of closing immediately. This lets profits run while protecting gains:
+- Tracks the peak price since entering TP zone
+- Closes if price drops 0.5% from peak (trailing stop)
+- Closes if price falls below original entry
+- Closes when 6 hours from short zone (time-based exit)
 
 ## Requirements
 
@@ -36,6 +42,8 @@ node bot.js --close  # Close any open position
 Edit `bot.js` to adjust:
 - `TARGET_LEVERAGE` - Leverage multiplier (default: 10)
 - `PROFIT_TARGET_PCT` - Price move % to take profit (default: 1.0)
+- `TP_ZONE_TRAILING_STOP_PCT` - Trailing stop % for TP zone (default: 0.5)
+- `TP_ZONE_HOURS_THRESHOLD` - Hours before short zone to enter/exit TP zone (default: 6)
 - `holidays` - Market holidays to skip trading
 
 ## Adaptive Learning
