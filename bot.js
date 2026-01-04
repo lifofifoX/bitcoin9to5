@@ -13,9 +13,7 @@ const ZONE_CONFIG_FILE = '.zone-config.json'
 const loadZoneConfig = () => {
   try {
     if (existsSync(ZONE_CONFIG_FILE)) {
-      const config = JSON.parse(readFileSync(ZONE_CONFIG_FILE, 'utf8'))
-      console.log('Loaded zone config:', config.flipToShortReadable, '/', config.flipToLongReadable)
-      return config
+      return JSON.parse(readFileSync(ZONE_CONFIG_FILE, 'utf8'))
     }
   } catch (err) {
     console.error('Failed to load zone config:', err.message)
