@@ -56,16 +56,16 @@ const loadState = () => {
   try {
     if (existsSync(STATE_FILE)) {
       const data = JSON.parse(readFileSync(STATE_FILE, 'utf8'))
-      return { ...data, processing: false, inTpZone: data.inTpZone || false, tpZonePeakPrice: data.tpZonePeakPrice || null }
+      return { ...data, processing: false, logCounter: 0, inTpZone: data.inTpZone || false, tpZonePeakPrice: data.tpZonePeakPrice || null }
     }
   } catch (err) {
     console.error('Failed to load state:', err.message)
   }
-  return { entryPrice: null, zone: 'long', processing: false, inTpZone: false, tpZonePeakPrice: null }
+  return { entryPrice: null, zone: 'long', processing: false, logCounter: 0, inTpZone: false, tpZonePeakPrice: null }
 }
 
 const saveState = () => {
-  const { processing, ...persistedState } = state
+  const { processing, logCounter, ...persistedState } = state
   writeFileSync(STATE_FILE, JSON.stringify(persistedState, null, 2))
 }
 
@@ -331,6 +331,7 @@ const flipToLong = async () => {
 const checkProfit = async () => {
   if (state.processing) return
   state.processing = true
+  state.logCounter++
 
   try {
     const position = await getPosition()
@@ -367,12 +368,9 @@ const checkProfit = async () => {
       const belowEntry = midPrice < state.entryPrice
       const trailingStopPrice = state.tpZonePeakPrice * (1 - TP_ZONE_TRAILING_STOP_PCT / 100)
 
-      log('tp-zone', {
-        price: midPrice.toFixed(0),
-        peak: state.tpZonePeakPrice.toFixed(0),
-        closeAt: trailingStopPrice.toFixed(0),
-        floor: state.entryPrice.toFixed(0)
-      })
+      if (state.logCounter % 10 === 0) {
+        log('tp-zone', `price: ${midPrice.toFixed(0)} | peak: ${state.tpZonePeakPrice.toFixed(0)} | closeAt: ${trailingStopPrice.toFixed(0)} | floor: ${state.entryPrice.toFixed(0)}`)
+      }
 
       if (dropFromPeak >= TP_ZONE_TRAILING_STOP_PCT || hoursUntilShort <= TP_ZONE_HOURS_THRESHOLD || belowEntry) {
         const reason = belowEntry ? 'below-entry' : dropFromPeak >= TP_ZONE_TRAILING_STOP_PCT ? 'trailing-stop' : 'time-exit'
@@ -396,13 +394,9 @@ const checkProfit = async () => {
       ? state.entryPrice * (1 + PROFIT_TARGET_PCT / 100)
       : state.entryPrice * (1 - PROFIT_TARGET_PCT / 100)
 
-    log('monitor', {
-      side: position.side,
-      price: midPrice.toFixed(0),
-      entry: state.entryPrice.toFixed(0),
-      target: targetPrice.toFixed(0),
-      pct: profitPct.toFixed(2)
-    })
+    if (state.logCounter % 10 === 0) {
+      log('monitor', `${position.side} @ ${midPrice.toFixed(0)} | entry: ${state.entryPrice.toFixed(0)} | target: ${targetPrice.toFixed(0)} | ${profitPct.toFixed(2)}%`)
+    }
 
     if (profitPct >= PROFIT_TARGET_PCT) {
       if (position.side === 'long') {
