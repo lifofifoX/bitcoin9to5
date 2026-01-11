@@ -534,7 +534,7 @@ const analyzeAndUpdateConfig = () => {
   const adjustTime = (timeStr) => {
     const [h, m] = timeStr.split(':').map(Number)
     let totalMins = h * 60 + m - 10
-    return `${Math.floor(totalMins / 60)}:${totalMins % 60}`
+    return `${Math.floor(totalMins / 60)}:${String(totalMins % 60).padStart(2, '0')}`
   }
 
   const shortTime = adjustTime(bestShortTime)
