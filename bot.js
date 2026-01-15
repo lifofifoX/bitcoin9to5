@@ -394,8 +394,11 @@ const checkProfit = async () => {
       ? state.entryPrice * (1 + PROFIT_TARGET_PCT / 100)
       : state.entryPrice * (1 - PROFIT_TARGET_PCT / 100)
 
-    if (state.logCounter % 10 === 0) {
-      log('monitor', `${position.side} @ ${midPrice.toFixed(0)} | entry: ${state.entryPrice.toFixed(0)} | target: ${targetPrice.toFixed(0)} | ${profitPct.toFixed(2)}%`)
+    if (state.logCounter % 20 === 0) {
+      const nextZoneTime = position.side === 'long'
+        ? zoneConfig?.flipToShortReadable || '9:29'
+        : zoneConfig?.flipToLongReadable || '16:01'
+      log('monitor', `${position.side} @ ${midPrice.toFixed(0)} | entry: ${state.entryPrice.toFixed(0)} | target: ${targetPrice.toFixed(0)} | ${profitPct.toFixed(2)}% | flip: ${nextZoneTime}`)
     }
 
     if (profitPct >= PROFIT_TARGET_PCT) {
