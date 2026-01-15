@@ -21,7 +21,7 @@ const loadZoneConfig = () => {
   return null
 }
 
-const zoneConfig = loadZoneConfig()
+let zoneConfig = loadZoneConfig()
 const flipToShortTime = zoneConfig?.flipToShortTime || '29 9 * * 1-5'
 const flipToLongTime = zoneConfig?.flipToLongTime || '1 16 * * 1-5'
 
@@ -84,6 +84,7 @@ const saveMarketData = (data) => {
 
 const saveZoneConfig = (config) => {
   writeFileSync(ZONE_CONFIG_FILE, JSON.stringify(config, null, 2))
+  zoneConfig = config
   log('zone-config', { short: config.flipToShortReadable, long: config.flipToLongReadable })
 }
 
