@@ -56,12 +56,12 @@ const loadState = () => {
   try {
     if (existsSync(STATE_FILE)) {
       const data = JSON.parse(readFileSync(STATE_FILE, 'utf8'))
-      return { ...data, processing: false, logCounter: 0, inTpZone: data.inTpZone || false, tpZonePeakPrice: data.tpZonePeakPrice || null }
+      return { ...data, processing: false, logCounter: 0, inTpZone: data.inTpZone || false, tpZonePeakPrice: data.tpZonePeakPrice || null, profitTakenThisZone: data.profitTakenThisZone || false }
     }
   } catch (err) {
     console.error('Failed to load state:', err.message)
   }
-  return { entryPrice: null, zone: 'long', processing: false, logCounter: 0, inTpZone: false, tpZonePeakPrice: null }
+  return { entryPrice: null, zone: 'long', processing: false, logCounter: 0, inTpZone: false, tpZonePeakPrice: null, profitTakenThisZone: false }
 }
 
 const saveState = () => {
@@ -310,8 +310,14 @@ const flipToShort = async () => {
     return
   }
 
+  if (state.zone === 'short' && state.profitTakenThisZone) {
+    log('skip', 'profit already taken this zone')
+    return
+  }
+
   try {
     state.zone = 'short'
+    state.profitTakenThisZone = false
     saveState()
     await enterPosition('short')
   } catch (err) {
@@ -320,8 +326,14 @@ const flipToShort = async () => {
 }
 
 const flipToLong = async () => {
+  if (state.zone === 'long' && state.profitTakenThisZone) {
+    log('skip', 'profit already taken this zone')
+    return
+  }
+
   try {
     state.zone = 'long'
+    state.profitTakenThisZone = false
     saveState()
     await enterPosition('long')
   } catch (err) {
@@ -386,6 +398,7 @@ const checkProfit = async () => {
         await closePosition()
         state.inTpZone = false
         state.tpZonePeakPrice = null
+        state.profitTakenThisZone = true
         saveState()
       }
       return
@@ -426,6 +439,8 @@ const checkProfit = async () => {
         profitPct: profitPct.toFixed(2)
       })
       await closePosition()
+      state.profitTakenThisZone = true
+      saveState()
     }
   } catch (err) {
     console.error('price check error:', err)
